@@ -1,0 +1,12 @@
+[Unit]
+Description=Splunk Exporter Service
+After=network.target
+
+[Service]
+User={{ splunk_exporter_user }}
+Group={{ splunk_exporter_group }}
+ExecStart={{ splunk_exporter_install_path }}
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,57 @@
+---
+- name: splunk_exporter - Create Splunk Exporter User
+  ansible.builtin.user:
+    become: true
+    name: "{{ splunk_exporter_user }}"
+    system: yes
+    create_home: no
+
+- name: splunk_exporter - Create Splunk Exporter Group
+  ansible.builtin.user:
+    become: true
+    name: "{{ splunk_exporter_group }}"
+    system: yes
+    state: present
+
+- name: splunk_exporter - Create Install Directory
+  ansible.builtin.file:
+    become: true
+    name: "{{ splunk_exporter_istall_path }}"
+    state: directory
+    owner: "{{ splunk_exporter_user }}"
+    group: "{{ splunk_exporter_group }}"
+    mode: '755'
+
+# Req cleanup ?
+- name: splunk_exporter - Download Splunk package
+  ansilbe.builtin.get_url:
+    url: "{{ splunk_exporter_url }}"
+    dest: "{{ splunk_exporter_install_path }}/splunk-exporter"
+    owner: "{{ splunk_exporter_user }}"
+    group: "{{ splunk_exporter_group }}"
+    mode: '755'
+
+- name: splunk_exporter - Drop Splunk Configuration
+  ansible.builtin.template:
+    become: true
+    src: splunk-exporter.conf.j2
+    dest: "{{ splunk_exporter_install_path }}/splunk-exporter.conf"
+    owner: "{{ splunk_exporter_user }}"
+    group: "{{ splunk_exporter_group }}"
+    mode: '0644'
+  # notify: restart_splunk_exporter
+
+- name: splunk_exporter - Drop systemd service template
+  ansible.builtin.template:
+    become: true
+    src: splunk-exporter.service.j2
+    dest: /etc/systemd/system/splunk-exporter.service
+    mode: '644'
+  # notify: restart_splunk_exporter
+
+- name: splunk_exporter - Enable and Start Splunk Exporter Service
+  ansible.builtin.service:
+    become: true
+    name: splunk-exporter
+    state: started
+    enabled: true

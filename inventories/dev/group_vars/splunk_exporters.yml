@@ -1,0 +1,8 @@
+---
+splunk_exporter_user: "splunk-exporter"
+splunk_exporter_group: "splunk-exporter"
+splunk_exporter_install_path: "/opt/splunk-exporter"
+splunk_exporter_url: " "
+splunk_exporter_port: " "
+splunk_api_url: " "
+splunk_api_token: " "

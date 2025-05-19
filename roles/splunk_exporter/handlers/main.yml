@@ -1,0 +1,5 @@
+---
+- name: restart_splunk_exporter
+  ansible.builtin.service:
+    name: splunk-exporter
+    state: restarted
