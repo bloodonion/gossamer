@@ -1,0 +1,43 @@
+cat << EOF > /var/lib/libvirt/images/ks.cfg
+# Use CDROM installation media
+cdrom
+# Set language, keyboard, and timezone
+lang en_US.UTF-8
+keyboard us
+timezone Australia/Sydney --utc
+# Set root password (use --plaintext for simplicity, or hash for security)
+rootpw --plaintext MySecurePass123
+# Create a user (optional, with sudo privileges)
+user --name=user --password=UserPass123 --groups=wheel
+# Configure network to use DHCP on the first interface
+network --bootproto=dhcp --device=eth0 --onboot=on
+# Clear disk and set up automatic partitioning
+zerombr
+clearpart --all --initlabel
+autopart
+# Reboot after installation
+reboot
+# Install minimal package set and SSH server
+%packages
+@^minimal-environment
+openssh-server
+%end
+# Enable SSH and firewall rules in post-install
+%post
+systemctl enable sshd
+firewall-cmd --add-service=ssh --permanent
+firewall-cmd --reload
+%end
+EOF
+
+
+
+# openssl passwd -6 UserPass123
+#set permissions for cfg file
+# sudo chcon -t virt_content_t /var/lib/libvirt/images/ks.cfg
+
+rootpw --iscrypted $6$9X8z3k4Qw2pX7y9L$4X2z9k4Qw2pX7y9L8z3k4Qw2pX7y9L8z3k4Qw2pX7y9L
+network --bootproto=static --device=eth0 --ip=192.168.1.100 --netmask=255.255.255.0 --gateway=192.168.1.1 --nameserver=8.8.8.8,8.8.4.4 --onboot=on --hostname=rocky9virt
+zerombr clearpart --all --initlabel autopart
+
+reboot
