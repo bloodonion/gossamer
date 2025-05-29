@@ -10,5 +10,5 @@
     - name: Save facts to a file named after the server
       ansible.builtin.copy:
         content: "{{ facts_result.ansible_facts | to_nice_json }}"
-        dest: "/path/to/output/{{ ansible_hostname }}_facts.json"
+        dest: "/home/user/facts/{{ ansible_hostname }}_facts.json"
       delegate_to: localhost

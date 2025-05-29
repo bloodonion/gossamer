@@ -3,3 +3,12 @@ OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
 IP Address: {{ ansible_default_ipv4.address }}
 Memory: {{ ansible_memory_mb.real.total }} MB
 CPU Count: {{ ansible_processor_vcpus }}
+Distribution: {{ ansible_distribution }} {{ ansible_distribution_version }}
+DNS: {{ ansible_dns.nameservers }}
+ansible_domain: {{ ansible_domain }}
+macaddress: {{ ansible_eno1.macaddress }}
+ansible_fqdn: {{ ansible_fqdn }}
+ansible_hostname: {{ ansible_hostname }}
+ansible_processor_cores: {{ ansible_processor_cores }}
+ansible_processor_count: {{ ansible_processor_count }}
+ansible_selinux_python_present: {{ ansible_selinux_python_present }}

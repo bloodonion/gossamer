@@ -9,6 +9,6 @@
 
     - name: Save facts to a file named after the server
       ansible.builtin.template:
-        src: facts_template.j2
-        dest: "/path/to/output/{{ ansible_hostname }}_facts.txt"
+        src: ../templates/facts_template.j2
+        dest: "/home/user/facts2/{{ ansible_hostname }}_facts.txt"
       delegate_to: localhost
