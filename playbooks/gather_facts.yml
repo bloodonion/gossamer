@@ -1,0 +1,14 @@
+---
+- name: Gather and store facts from remote server
+  hosts: all
+  gather_facts: true  # Ensures facts are gathered
+  tasks:
+    - name: Gather facts from remote server
+      ansible.builtin.setup:
+      register: facts_result
+
+    - name: Save facts to a file named after the server
+      ansible.builtin.copy:
+        content: "{{ facts_result.ansible_facts | to_nice_json }}"
+        dest: "/path/to/output/{{ ansible_hostname }}_facts.json"
+      delegate_to: localhost
