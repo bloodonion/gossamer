@@ -1,0 +1,116 @@
+---
+- name: Setup 6-8TB NVMe drives with persistent labeling + UUID mounting
+  hosts: all
+  become: yes
+  vars:
+    # 6TB and 8TB in bytes (using 1024^4)
+    size_min_tb: 6597069766656
+    size_max_tb: 8796093022208
+
+  tasks:
+
+    - name: Gather fresh device facts (required for partitions, labels, UUIDs, serials)
+      ansible.builtin.setup:
+        filter: ansible_devices
+
+    - name: Identify 6-8TB NVMe whole disks, sort by serial (guarantees same drive = same nvmeN on OS rebuild), assign logical names
+      set_fact:
+        target_drives: >-
+          {% set ns = namespace(drives=[]) %}
+          {% set sorted_cands = (
+            ansible_devices
+            | dict2items
+            | selectattr('key', 'match', '^nvme[0-9]+n[0-9]+$')
+            | list
+            | sort(attribute='value.serial', default_value='')
+          ) %}
+          {% for d in sorted_cands %}
+            {% if d.value.size is defined
+               and d.value.size | int >= size_min_tb
+               and d.value.size | int <= size_max_tb %}
+              {% set _ = ns.drives.append({
+                  'device': d.key,
+                  'logical_name': 'nvme' ~ loop.index,
+                  'serial': d.value.serial | default('unknown')
+              }) %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.drives }}
+
+    - name: Debug found drives (remove in production)
+      debug:
+        msg: >
+          Using {{ target_drives | length }} drives.
+          {% for d in target_drives %}
+          • {{ d.device }} (serial {{ d.serial }}) → label "{{ d.logical_name }}" → mount /data/{{ d.logical_name }}
+          {% endfor %}
+
+    - name: Create mount point directories
+      ansible.builtin.file:
+        path: "/data/{{ item.logical_name }}"
+        state: directory
+        mode: '0755'
+      loop: "{{ target_drives }}"
+
+    # === PARTITION + FORMAT ONLY IF NOT ALREADY DONE CORRECTLY ===
+    - name: Create GPT partition table (idempotent)
+      community.general.parted:
+        device: "/dev/{{ item.device }}"
+        label: gpt
+        state: present
+      loop: "{{ target_drives }}"
+      when: >
+        ansible_devices[item.device].partitions is not defined
+        or ansible_devices[item.device].partitions | length == 0
+
+    - name: Create full-size partition 1 (idempotent)
+      community.general.parted:
+        device: "/dev/{{ item.device }}"
+        number: 1
+        state: present
+        part_start: "1MiB"
+        part_end: "100%"
+      loop: "{{ target_drives }}"
+      when: >
+        ansible_devices[item.device].partitions is not defined
+        or ansible_devices[item.device].partitions | length == 0
+
+    - name: Format partition as XFS with exact label "nvmeN" (only if missing or wrong)
+      community.general.filesystem:
+        fstype: xfs
+        dev: "/dev/{{ item.device }}p1"
+        label: "{{ item.logical_name }}"
+        force: no
+      loop: "{{ target_drives }}"
+      when: >
+        (ansible_devices[item.device].partitions is not defined
+         or ansible_devices[item.device].partitions[item.device ~ 'p1'] is not defined)
+        or ansible_devices[item.device].partitions[item.device ~ 'p1'].fstype != 'xfs'
+        or (ansible_devices[item.device].partitions[item.device ~ 'p1'].label | default('') != item.logical_name)
+
+    # === RE-GATHER FACTS SO WE HAVE FRESH UUIDs AFTER FORMATTING ===
+    - name: Re-gather device facts (now we have UUIDs + labels)
+      ansible.builtin.setup:
+        filter: ansible_devices
+
+    # === MOUNT USING UUID (best practice, survives OS rebuild) ===
+    - name: Mount drives persistently using their filesystem UUID
+      ansible.posix.mount:
+        path: "/data/{{ item.logical_name }}"
+        src: "UUID={{ ansible_devices[item.device].partitions[item.device ~ 'p1'].uuid }}"
+        fstype: xfs
+        state: mounted
+        opts: "defaults,noatime"
+      loop: "{{ target_drives }}"
+      when: >
+        ansible_devices[item.device].partitions is defined
+        and ansible_devices[item.device].partitions[item.device ~ 'p1'] is defined
+        and ansible_devices[item.device].partitions[item.device ~ 'p1'].uuid is defined
+
+    - name: Final verification
+      debug:
+        msg: >
+          All drives mounted:
+          {% for d in target_drives %}
+          /data/{{ d.logical_name }} → UUID {{ ansible_devices[d.device].partitions[d.device ~ 'p1'].uuid | default('N/A') }}
+          {% endfor %}
