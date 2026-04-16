@@ -1,0 +1,110 @@
+---
+- name: Create dynamic software RAID using mdadm (stable device paths by size)
+  hosts: all
+  become: yes
+  vars:
+    # === CUSTOMISE THESE AS NEEDED ===
+    raid_level: "5"                  # Change to 0, 1, 6, 10 etc. (RAID5 is common for capacity + redundancy)
+    raid_device: "/dev/md0"          # The RAID array name
+    min_size_tb: 6                   # Minimum disk size in TB
+    max_size_tb: 9                   # Maximum disk size in TB
+    filesystem: "ext4"               # Optional: filesystem to create on the RAID (set to "" to skip)
+    mount_point: "/mnt/raid"         # Optional: mount point (set to "" to skip mounting)
+
+  tasks:
+
+    - name: Install mdadm (idempotent)
+      ansible.builtin.package:
+        name: mdadm
+        state: present
+
+    - name: Discover candidate disks (6-9 TB) using stable /dev/disk/by-id/ paths
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for devlink in /dev/disk/by-id/*; do
+          # Skip non-symlinks and partition links (we only want whole disks)
+          [[ -L "$devlink" ]] || continue
+          [[ "$devlink" != *-part[0-9]* ]] || continue
+
+          real_dev=$(readlink -f "$devlink")
+          # Get exact size in bytes using lsblk (reliable and always present)
+          size_bytes=$(lsblk -b -o SIZE -n -d "$real_dev" 2>/dev/null || echo 0)
+
+          min_bytes=$(( {{ min_size_tb }} * 1024**4 ))
+          max_bytes=$(( {{ max_size_tb }} * 1024**4 ))
+
+          if [ "$size_bytes" -ge "$min_bytes" ] && [ "$size_bytes" -le "$max_bytes" ]; then
+            echo "$devlink"
+          fi
+        done | sort -u
+      args:
+        executable: /bin/bash
+      register: candidate_disks_raw
+      changed_when: false
+      # This task always runs cleanly; it just discovers
+
+    - name: Set dynamic RAID devices variable (stable paths, no /dev/sdX)
+      ansible.builtin.set_fact:
+        raid_devices: "{{ candidate_disks_raw.stdout_lines | default([]) }}"
+
+    - name: Debug discovered disks
+      ansible.builtin.debug:
+        msg: |
+          Found {{ raid_devices | length }} candidate disk(s) between {{ min_size_tb }}-{{ max_size_tb }} TB:
+          {{ raid_devices | join(' ') }}
+
+    - name: Fail if fewer than 2 suitable disks found
+      ansible.builtin.fail:
+        msg: "Not enough disks found for RAID (need at least 2). Discovered: {{ raid_devices | length }}"
+      when: raid_devices | length < 2
+
+    - name: Check if RAID array {{ raid_device }} already exists
+      ansible.builtin.command: mdadm --detail {{ raid_device }}
+      register: mdadm_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create the software RAID array with mdadm (only if it doesn't exist)
+      ansible.builtin.command: >
+        mdadm --create {{ raid_device }}
+        --level={{ raid_level }}
+        --raid-devices={{ raid_devices | length }}
+        {{ raid_devices | join(' ') }}
+        --verbose
+      when: mdadm_check.rc != 0
+      notify: Update mdadm config
+
+    - name: Wait for RAID array to be fully initialised (optional but recommended)
+      ansible.builtin.command: cat /proc/mdstat
+      register: mdstat
+      until: "'resync' not in mdstat.stdout and 'recovery' not in mdstat.stdout"
+      retries: 60
+      delay: 10
+      when: mdadm_check.rc != 0
+
+    - name: Create filesystem on RAID (if defined)
+      community.general.filesystem:
+        fstype: "{{ filesystem }}"
+        dev: "{{ raid_device }}"
+      when: filesystem != ""
+
+    - name: Create mount point (if defined)
+      ansible.builtin.file:
+        path: "{{ mount_point }}"
+        state: directory
+        mode: '0755'
+      when: mount_point != ""
+
+    - name: Mount the RAID array (if defined)
+      ansible.posix.mount:
+        path: "{{ mount_point }}"
+        src: "{{ raid_device }}"
+        fstype: "{{ filesystem }}"
+        state: mounted
+        opts: defaults,noatime
+      when: mount_point != "" and filesystem != ""
+
+  handlers:
+    - name: Update mdadm config
+      ansible.builtin.command: mdadm --detail --scan > /etc/mdadm/mdadm.conf
+      changed_when: true
